@@ -138,6 +138,12 @@ class NeuralBellmanFordNetwork(nn.Module, core.Configurable):
         if graph.num_relation:
             graph = graph.undirected(add_inverse=True)
             h_index, t_index, r_index = self.negative_sample_to_tail(h_index, t_index, r_index)
+            print('h shape', h_index.shape)
+            print('r shape', r_index.shape)
+            print('t shape', t_index.shape)
+            print('h', h_index)
+            print('r', r_index)
+            print('t', t_index)
         else:
             graph = self.as_relational_graph(graph)
             h_index = h_index.view(-1, 1)

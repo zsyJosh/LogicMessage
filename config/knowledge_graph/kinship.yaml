@@ -23,6 +23,11 @@ task:
     ff_factor: 4
     num_relation: 26
     target_size: 25
+  criterion: bce
+  num_negative: 32
+  strict_negative: yes
+  adversarial_temperature: 0.5
+  sample_weight: no
 
 optimizer:
   class: Adam
