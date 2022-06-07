@@ -138,12 +138,6 @@ class NeuralBellmanFordNetwork(nn.Module, core.Configurable):
         if graph.num_relation:
             graph = graph.undirected(add_inverse=True)
             h_index, t_index, r_index = self.negative_sample_to_tail(h_index, t_index, r_index)
-            print('h shape', h_index.shape)
-            print('r shape', r_index.shape)
-            print('t shape', t_index.shape)
-            print('h', h_index)
-            print('r', r_index)
-            print('t', t_index)
         else:
             graph = self.as_relational_graph(graph)
             h_index = h_index.view(-1, 1)
@@ -153,6 +147,8 @@ class NeuralBellmanFordNetwork(nn.Module, core.Configurable):
         assert (h_index[:, [0]] == h_index).all()
         assert (r_index[:, [0]] == r_index).all()
         output = self.bellmanford(graph, h_index[:, 0], r_index[:, 0])
+        print('out_node_f shape', output["node_feature"].shape)
+        print('out_node_f', output["node_feature"])
         feature = output["node_feature"].transpose(0, 1)
         index = t_index.unsqueeze(-1).expand(-1, -1, feature.shape[-1])
         feature = feature.gather(1, index)
@@ -165,7 +161,10 @@ class NeuralBellmanFordNetwork(nn.Module, core.Configurable):
             inv_feature = inv_feature.gather(1, index)
             feature = (feature + inv_feature) / 2
 
+        print('feature shape', feature.shape)
         score = self.mlp(feature).squeeze(-1)
+        print('score', score.shape)
+        print('final', score.view(shape).shape)
         return score.view(shape)
 
     def visualize(self, graph, h_index, t_index, r_index):

@@ -34,7 +34,9 @@ class kinship(data.KnowledgeGraphDataset):
         txt_files = []
         for url in self.urls:
             save_file = "kinship_%s" % os.path.basename(url)
-            txt_file = utils.download(url, self.path, save_file=save_file)
+            txt_file = os.path.join(path, save_file)
+            assert os.path.exists(txt_file)
+            print("%s exists" % (txt_file))
             txt_files.append(txt_file)
 
         self.load_tsvs(txt_files, verbose=verbose)
