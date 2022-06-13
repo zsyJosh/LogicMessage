@@ -225,8 +225,9 @@ class EdgeTransformerEncoder(nn.Module):
         batch_size = h_index.shape[0]
         num_samples = h_index.shape[1]
 
-        init_input = torch.stack([self.mask_emb(torch.tensor(2 * self.num_relation)).clone().detach() for i in range(self.num_nodes * self.num_nodes)])
+        init_input = torch.stack([self.mask_emb(torch.tensor(2 * self.num_relation, device=graph.device)).clone().detach() for i in range(self.num_nodes * self.num_nodes)])
         init_input.requires_grad = True
+        init_input.to(graph.device)
 
         # fill in original graph relation embeddings
         adj = graph.adjacency
