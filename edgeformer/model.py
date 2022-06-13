@@ -230,6 +230,12 @@ class EdgeTransformerEncoder(nn.Module):
         init_input.to(graph.device)
 
         # fill in original graph relation embeddings
+        # test only
+        '''
+        tid = torch.randint(104, (12216, 12216), device=graph.device)
+        rid = torch.randint(50, (1, 12216), device=graph.device)
+        adj_ind = torch.cat([tid, rid], dim=0)
+        '''
         adj = graph.adjacency
         adj_ind = adj._indices()
         graph_r_ind = adj_ind[2]
@@ -288,7 +294,7 @@ class EdgeTransformerEncoder(nn.Module):
             for mod in self.layers:
                 batched_graphs = mod(batched_graphs, mask=mask)
         else:
-            for i in range(self.num_message_rounds):
+            for i in range(self.num_layers):
                 batched_graphs = self.layers[0](batched_graphs, mask=mask)
 
         # calculate final representation
