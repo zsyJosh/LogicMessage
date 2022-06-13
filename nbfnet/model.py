@@ -131,7 +131,6 @@ class NeuralBellmanFordNetwork(nn.Module, core.Configurable):
         }
 
     def forward(self, graph, h_index, t_index, r_index=None, all_loss=None, metric=None):
-        print('graph', graph)
         if all_loss is not None:
             graph = self.remove_easy_edges(graph, h_index, t_index, r_index)
 
@@ -148,8 +147,6 @@ class NeuralBellmanFordNetwork(nn.Module, core.Configurable):
         assert (h_index[:, [0]] == h_index).all()
         assert (r_index[:, [0]] == r_index).all()
         output = self.bellmanford(graph, h_index[:, 0], r_index[:, 0])
-        print('out_node_f shape', output["node_feature"].shape)
-        print('out_node_f', output["node_feature"])
         feature = output["node_feature"].transpose(0, 1)
         index = t_index.unsqueeze(-1).expand(-1, -1, feature.shape[-1])
         feature = feature.gather(1, index)
@@ -162,10 +159,7 @@ class NeuralBellmanFordNetwork(nn.Module, core.Configurable):
             inv_feature = inv_feature.gather(1, index)
             feature = (feature + inv_feature) / 2
 
-        print('feature shape', feature.shape)
         score = self.mlp(feature).squeeze(-1)
-        print('score', score.shape)
-        print('final', score.view(shape).shape)
         return score.view(shape)
 
     def visualize(self, graph, h_index, t_index, r_index):
