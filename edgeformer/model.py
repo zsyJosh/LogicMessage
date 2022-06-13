@@ -262,7 +262,7 @@ class EdgeTransformerEncoder(nn.Module):
         assert batched_graph_input.shape == (self.num_nodes * self.num_nodes * batch_size, self.dim)
 
         # add query specific mask to each batch
-        batch_ind = torch.arange(batch_size).repeat(num_samples, 1).T
+        batch_ind = torch.arange(batch_size, device=graph.device).repeat(num_samples, 1).T
         assert batch_ind.shape == h_index.shape
         query_mask_ind = batch_ind * self.num_nodes * self.num_nodes + h_index * self.num_nodes + t_index
         query_mask_ind = query_mask_ind.flatten()
