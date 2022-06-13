@@ -232,7 +232,7 @@ class EdgeTransformerEncoder(nn.Module):
         # fill in original graph relation embeddings
         # test only
         '''
-        tid = torch.randint(104, (12216, 12216), device=graph.device)
+        tid = torch.randint(104, (2, 12216), device=graph.device)
         rid = torch.randint(50, (1, 12216), device=graph.device)
         adj_ind = torch.cat([tid, rid], dim=0)
         '''
