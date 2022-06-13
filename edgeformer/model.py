@@ -4,7 +4,7 @@ import torch
 from torch import nn
 from torch.nn import Parameter, ModuleList, LayerNorm, Dropout
 import torch.nn.functional as F
-from torch.optim import AdamW, Adam
+from torch_scatter import scatter_add, scatter_mean, scatter_max, scatter_sum
 
 from torchdrug import core, layers, utils
 from torchdrug.layers import functional
@@ -177,7 +177,7 @@ class EdgeTransformerLayer(nn.Module):
 
 class EdgeTransformerEncoder(nn.Module):
 
-    def __init__(self, h_index, t_index, r_index, num_heads, num_relation, num_nodes, dropout, dim, ff_factor, flat_attention, activation="relu"):
+    def __init__(self, num_heads, num_relation, num_nodes, dropout, dim, ff_factor, share_layers, num_message_rounds, flat_attention, activation="relu", emb_aggregate='mean'):
         super().__init__()
 
         self.num_heads = num_heads
@@ -187,24 +187,21 @@ class EdgeTransformerEncoder(nn.Module):
         self.dim = dim
         self.ff_factor =ff_factor
         self.deep_residual = False
-        self.share_layers = self.share_layers
-        self.num_layers = self.num_message_rounds
+        self.share_layers = share_layers
+        self.num_layers = num_message_rounds
+        self.emb_aggregate = emb_aggregate
 
-        # last two embeddings are for queried_mask and unqueried_mask
-        self.relation_emb = torch.nn.Embedding(num_embeddings=2 * self.num_relation + 2, embedding_dim=self.dim)
-
-        # any pair of (i, j) can be indexed to relation embedding through pair_index
-        pair_index = torch.tensor([2 * self.num_relation + 1] * (self.num_nodes * self.num_nodes), dtype=torch.int)
-        indexing = h_index * self.num_nodes + t_index
-        pair_index[indexing] = r_index
-        self.pair_index = pair_index
+        # 2 * num_relation(relation and inverse relation)
+        self.relation_emb = torch.nn.Embedding(num_embeddings=2*self.num_relation, embedding_dim=self.dim)
+        # 2 * num_relation(relation and inverse relation) + 1(unqueried mask)
+        self.mask_emb = torch.nn.Embedding(num_embeddings=2*self.num_relation+1, embedding_dim=self.dim)
 
         encoder_layer = EdgeTransformerLayer(num_heads, dropout, dim, ff_factor, flat_attention, activation=activation)
         self.layers = _get_clones(encoder_layer, self.num_layers)
 
         self._reset_parameters()
 
-    def easy_edges(self, graph, h_index, t_index, r_index=None):
+    def remove_easy_edges(self, graph, h_index, t_index, r_index=None):
         if self.remove_one_hop:
             h_index_ext = torch.cat([h_index, t_index], dim=-1)
             t_index_ext = torch.cat([t_index, h_index], dim=-1)
@@ -220,39 +217,59 @@ class EdgeTransformerEncoder(nn.Module):
                 pattern = torch.stack([h_index, t_index], dim=-1)
         pattern = pattern.flatten(0, -2)
         edge_index = graph.match(pattern)[0]
-        remove_edge_mask = functional.as_mask(edge_index, graph.num_edge)
-        return remove_edge_mask
+        edge_mask = ~functional.as_mask(edge_index, graph.num_edge)
+        return graph.edge_mask(edge_mask)
 
     def forward(self, graph, h_index, t_index, r_index=None, all_loss=None, metric=None):
-        if all_loss is not None:
-            remove_edge_mask = self.easy_edges(graph, h_index, t_index, r_index)
-            remove_edge_index = graph.edge_list[:, 0] * self.num_nodes + graph.edge_list[:, 1]
-            batch_pair_index = self.pair_index.clone()
-            batch_pair_index[remove_edge_index[remove_edge_mask]] = self.num_relation + 1
 
-        shape = h_index.shape
-        assert graph.num_relation
-        graph = graph.undirected(add_inverse=True)
+        batch_size = h_index.shape[0]
+        num_samples = h_index.shape[1]
+
+        init_input = torch.stack([self.mask_emb(torch.tensor(2 * self.num_relation)).clone().detach() for i in range(self.num_nodes * self.num_nodes)])
+        init_input.requires_grad = True
+
+        # fill in original graph relation embeddings
         adj = graph.adjacency
-        dense_adj = adj.to_dense().to(torch.int64)
-        assert adj.shape == (self.num_nodes, self.num_nodes, self.num_relation)
+        adj_ind = adj._indices()
+        graph_r_ind = adj_ind[2]
+        graph_r_emb = self.relation_emb(graph_r_ind)
+        origin_index = adj_ind[0] * self.num_nodes + adj_ind[1]
+        origin_index = origin_index.repeat(self.dim, 1).T
 
-        # convert dense adjacency matrix of (|V|, |V|, relation_num) to one of (|V|, |V|) with relation specified in matrix
-        full_ind = torch.arange(graph.num_relation * 2).repeat(self.num_nodes, self.num_nodes, 1)
-        adj_mat = torch.zeros((self.num_nodes, self.num_nodes, 2)) - 1
-        adj_mat = adj_mat.to(torch.int64)
-        adj_mat = torch.scatter(adj_mat, -1, dense_adj, full_ind)
-        adj_mat = adj_mat[:, :, 1]
+        # first set zero before filling
+        rec_emb = torch.zeros(origin_index.shape)
+        init_input.scatter(0, origin_index, rec_emb)
 
-        h_index, t_index, r_index = self.negative_sample_to_tail(h_index, t_index, r_index)
+        # then fill in relations and query specific masks
+        if self.emb_aggregate == "sum":
+            fill_emb = scatter_add(graph_r_emb, origin_index, dim=0, dim_size=self.num_nodes * self.num_nodes)
+        elif self.emb_aggregate == "mean":
+            fill_emb = scatter_mean(graph_r_emb, origin_index, dim=0, dim_size=self.num_nodes * self.num_nodes)
+        elif self.emb_aggregate == "max":
+            fill_emb = scatter_max(graph_r_emb, origin_index, dim=0, dim_size=self.num_nodes * self.num_nodes)[0]
+        else:
+            raise NotImplementedError
 
-        assert (h_index[:, [0]] == h_index).all()
-        assert (r_index[:, [0]] == r_index).all()
+        graph_emb = init_input + fill_emb
+        assert graph_emb.shape == (self.num_nodes * self.num_nodes, self.dim)
 
+        # creat B batches with same graph input
+        batched_graph_input = graph_emb.repeat(batch_size, 1, 1)
+        batched_graph_input = batched_graph_input.view(-1, self.dim)
+        assert batched_graph_input.shape == (self.num_nodes * self.num_nodes * batch_size, self.dim)
 
-        adj_mat = adj_mat.unsqueeze(0)
-        batched_graphs = self.relation_emb(adj_mat)  # B x N x N x node_dim
-        assert batched_graphs.shape == (1, self.num_nodes, self.num_nodes, self.dim)
+        # add query specific mask to each batch
+        batch_ind = torch.arange(batch_size).repeat(num_samples, 1).T
+        assert batch_ind.shape == h_index.shape
+        query_mask_ind = batch_ind * self.num_nodes * self.num_nodes + h_index * self.num_nodes + t_index
+        query_mask_ind = query_mask_ind.flatten()
+        repeat_query_mask_ind = query_mask_ind.repeat(self.dim, 1).T
+
+        r_emb = self.mask_emb(r_index.flatten())
+        assert repeat_query_mask_ind.shape == r_emb.shape
+
+        batched_graph_input = batched_graph_input.scatter(0, repeat_query_mask_ind, r_emb)
+        batched_graphs = batched_graph_input.view(batch_size, self.num_nodes, self.num_nodes, self.dim)
 
         # currently consider all pairs of attention, mask is all false; if train graph is not full graph,
         # mask nodes not existent in train graph
@@ -271,7 +288,15 @@ class EdgeTransformerEncoder(nn.Module):
             for i in range(self.num_message_rounds):
                 batched_graphs = self.layers[0](batched_graphs, mask=mask)
 
-        return batched_graphs
+        # calculate final representation
+        batched_graphs_loss = batched_graphs.view(batch_size * self.num_nodes * self.num_nodes, self.dim)
+        binary_rep = batched_graphs_loss[query_mask_ind]
+        rel_rep_regularize = self.relation_emb(r_index.flatten())
+        assert binary_rep.shape == rel_rep_regularize.shape
+        final_rep = torch.cat([binary_rep, rel_rep_regularize], dim=-1)
+        final_rep = final_rep.view(batch_size, -1, self.dim)
+
+        return final_rep
 
     def _reset_parameters(self):
 
@@ -287,20 +312,22 @@ class EdgeTransformerEncoder(nn.Module):
 
 @R.register("model.edgeformer")
 class EdgeTransformer(nn.Module, core.Configurable):
-    def __init__(self, num_message_rounds=8, dropout=0.2, dim=200, num_heads=4, max_grad_norm=1.0, share_layers=True,
-                 no_share_layers=False, data_path='', lesion_values=False, lesion_scores=False,  flat_attention=False,
+    def __init__(self, num_message_rounds=8, dropout=0.2, dim=200, num_heads=4, num_mlp_layer=2, remove_one_hop=False, max_grad_norm=1.0, share_layers=True,
+                 no_share_layers=False, data_path='', lesion_values=False, lesion_scores=False, flat_attention=False,
                  ff_factor=4, num_relation=26, num_nodes=104, target_size=25):
         super().__init__()
 
-        self.save_hyperparameters()
-
         self.num_heads = num_heads
+        self.num_message_rounds = num_message_rounds
         self.num_relation = num_relation
         self.num_nodes = num_nodes
         self.dropout = dropout
         self.dim = dim
         self.ff_factor = ff_factor
         self.flat_attention = flat_attention
+        self.num_mlp_layer = num_mlp_layer
+        self.share_layers = share_layers
+        self.remove_one_hop = remove_one_hop
 
         input_dim = dim
         self.decoder2vocab = get_mlp(
@@ -309,74 +336,50 @@ class EdgeTransformer(nn.Module, core.Configurable):
         )
 
         self.crit = nn.CrossEntropyLoss(reduction='mean')
+        self.encoder = EdgeTransformerEncoder(self.num_heads, self.num_relation, self.num_nodes,
+                                              self.dropout, self.dim, self.ff_factor, self.share_layers, self.num_message_rounds, self.flat_attention)
+        self.mlp = layers.MLP(self.dim, [self.dim] * (self.num_mlp_layer - 1) + [1])
 
-    def load_train_graph(self, train_set):
-        self.train_full = train_set
-        h_list = []
-        t_list = []
-        r_list = []
-        for i in range(len(self.train_full)):
-            h_list.append(self.train_full[i][0])
-            t_list.append(self.train_full[i][1])
-            r_list.append(self.train_full[i][2])
-        h_list = torch.tensor(h_list)
-        t_list = torch.tensor(t_list)
-        r_list = torch.tensor(r_list)
-        self.encoder = EdgeTransformerEncoder(h_list, t_list, r_list, self.num_heads, self.num_relation, self.num_nodes,
-                                              self.dropout, self.dim, self.ff_factor, self.flat_attention)
+    def remove_easy_edges(self, graph, h_index, t_index, r_index=None):
+        if self.remove_one_hop:
+            h_index_ext = torch.cat([h_index, t_index], dim=-1)
+            t_index_ext = torch.cat([t_index, h_index], dim=-1)
+            if r_index is not None:
+                any = -torch.ones_like(h_index_ext)
+                pattern = torch.stack([h_index_ext, t_index_ext, any], dim=-1)
+            else:
+                pattern = torch.stack([h_index_ext, t_index_ext], dim=-1)
+        else:
+            if r_index is not None:
+                pattern = torch.stack([h_index, t_index, r_index], dim=-1)
+            else:
+                pattern = torch.stack([h_index, t_index], dim=-1)
+        pattern = pattern.flatten(0, -2)
+        edge_index = graph.match(pattern)[0]
+        edge_mask = ~functional.as_mask(edge_index, graph.num_edge)
+        return graph.edge_mask(edge_mask)
+
+    def negative_sample_to_tail(self, h_index, t_index, r_index):
+        # convert p(h | t, r) to p(t' | h', r')
+        # h' = t, r' = r^{-1}, t' = h
+        is_t_neg = (h_index == h_index[:, [0]]).all(dim=-1, keepdim=True)
+        new_h_index = torch.where(is_t_neg, h_index, t_index)
+        new_t_index = torch.where(is_t_neg, t_index, h_index)
+        new_r_index = torch.where(is_t_neg, r_index, r_index + self.num_relation)
+        return new_h_index, new_t_index, new_r_index
+
+    def forward(self, graph, h_index, t_index, r_index=None, all_loss=None, metric=None):
+        if all_loss is not None:
+            graph = self.remove_easy_edges(graph, h_index, t_index, r_index)
+        assert graph.num_relation
+        graph = graph.undirected(add_inverse=True)
+        h_index, t_index, r_index = self.negative_sample_to_tail(h_index, t_index, r_index)
+        assert (h_index[:, [0]] == h_index).all()
+        assert (r_index[:, [0]] == r_index).all()
+
+        final_rep = self.encoder(graph, h_index, t_index, r_index=None, all_loss=None, metric=None)
+        score = self.mlp(final_rep)
+        print('final', score.shape)
+        return score
 
 
-    def configure_optimizers(self):
-        # We will support Adam or AdamW as optimizers.
-        if self.model_config.optimizer == "AdamW":
-            opt = AdamW
-        elif self.model_config.optimizer == "Adam":
-            opt = Adam
-        optimizer = opt(self.parameters(), **self.model_config.optimizer_args)
-
-        return {'optimizer': optimizer}
-
-        # return {'optimizer':optimizer}
-
-    def _calculate_loss(self, batch):
-        batched_graphs = self.encoder(batch)
-
-        query_edges = batch['query_edges']
-
-        logits = self.decoder2vocab(batched_graphs[query_edges[:, 0], query_edges[:, 1], query_edges[:, 2]])
-
-        loss = self.crit(logits, batch['query_labels'])
-
-        return loss, logits
-
-    def training_step(self, batch, batch_idx):
-        loss, _ = self._calculate_loss(batch)
-
-        scheduler = self.lr_schedulers()
-
-        return loss
-
-    def compute_acc(self, batch, scores):
-        preds = scores.max(-1)[1]
-
-        labels = batch['query_labels']
-
-        acc = ((torch.eq(preds, labels).sum(0)) / preds.size(0)).detach()
-
-        return acc
-
-    def validation_step(self, batch, batch_idx):
-        loss, logits = self._calculate_loss(batch)
-
-        acc = self.compute_acc(batch, logits)
-
-        self.log("val_loss", loss, prog_bar=True)
-        self.log("val_acc", acc, prog_bar=True)
-
-    def test_step(self, batch, batch_idx):
-        loss, logits = self._calculate_loss(batch)
-
-        acc = self.compute_acc(batch, logits)
-
-        self.log("test_loss", loss, prog_bar=True)
-        self.log("test_acc", acc, prog_bar=True)

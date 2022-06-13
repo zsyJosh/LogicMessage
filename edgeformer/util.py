@@ -112,11 +112,9 @@ def build_solver(cfg, dataset):
         cfg.task.model.num_relation = dataset.num_relation
 
     task = core.Configurable.load_config_dict(cfg.task)
-    task.model.load_train_graph(train_set)
     cfg.optimizer.params = task.parameters()
     optimizer = core.Configurable.load_config_dict(cfg.optimizer)
-    scheduler = core.Configurable.load_config_dict(cfg.scheduler)
-    solver = core.Engine(task, train_set, valid_set, test_set, optimizer, scheduler, **cfg.engine)
+    solver = core.Engine(task, train_set, valid_set, test_set, optimizer, **cfg.engine)
 
     if "checkpoint" in cfg:
         solver.load(cfg.checkpoint)

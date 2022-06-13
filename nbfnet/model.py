@@ -131,6 +131,7 @@ class NeuralBellmanFordNetwork(nn.Module, core.Configurable):
         }
 
     def forward(self, graph, h_index, t_index, r_index=None, all_loss=None, metric=None):
+        print('graph', graph)
         if all_loss is not None:
             graph = self.remove_easy_edges(graph, h_index, t_index, r_index)
 
