@@ -238,7 +238,7 @@ class EdgeTransformerEncoder(nn.Module):
         origin_index = origin_index.repeat(self.dim, 1).T
 
         # first set zero before filling
-        rec_emb = torch.zeros(origin_index.shape)
+        rec_emb = torch.zeros(origin_index.shape, device=graph.device)
         init_input.scatter(0, origin_index, rec_emb)
 
         # then fill in relations and query specific masks
@@ -255,7 +255,9 @@ class EdgeTransformerEncoder(nn.Module):
         assert graph_emb.shape == (self.num_nodes * self.num_nodes, self.dim)
 
         # creat B batches with same graph input
-        batched_graph_input = graph_emb.repeat(batch_size, 1, 1)
+        #batched_graph_input = graph_emb.repeat(batch_size, 1, 1)
+        batched_graph_input = torch.stack([graph_emb.clone().detach() for i in range(batch_size)])
+        batched_graph_input.requires_grad = True
         batched_graph_input = batched_graph_input.view(-1, self.dim)
         assert batched_graph_input.shape == (self.num_nodes * self.num_nodes * batch_size, self.dim)
 
