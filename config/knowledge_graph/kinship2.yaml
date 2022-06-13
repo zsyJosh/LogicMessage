@@ -2,7 +2,7 @@ output_dir: ~/experiments/
 
 dataset:
   class: kinship
-  path: ~/datasets/knowledge_graphs/
+  path: /Users/zhaoshiyu/PycharmProjects/NBFNet/datasets/knowledge_graphs
 
 task:
   class: KnowledgeGraphCompletion
