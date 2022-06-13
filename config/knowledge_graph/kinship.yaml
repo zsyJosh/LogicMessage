@@ -21,7 +21,7 @@ task:
     lesion_scores: False
     flat_attention: False
     ff_factor: 4
-    num_relation: 26
+    num_relation: 25
     num_nodes: 104
     target_size: 25
   criterion: bce
