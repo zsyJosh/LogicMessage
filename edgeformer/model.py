@@ -282,7 +282,7 @@ class EdgeTransformerEncoder(nn.Module):
 
         # currently consider all pairs of attention, mask is all false; if train graph is not full graph,
         # mask nodes not existent in train graph
-        mask = torch.tensor([False] * self.num_nodes).unsqueeze(0)
+        mask = torch.tensor([False] * self.num_nodes, device=graph.device).unsqueeze(0)
 
         if mask is not None:
             new_mask = mask.unsqueeze(2) + mask.unsqueeze(1)
