@@ -9,7 +9,9 @@ from torchdrug import core
 from torchdrug.utils import comm
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from nbfnet import dataset, layer, model, task, util
+import dataset, layer, model, task, util
+
+from torchdrug.tasks import KnowledgeGraphCompletion
 
 
 def train_and_validate(cfg, solver):
