@@ -9,7 +9,7 @@ from torchdrug import core
 from torchdrug.utils import comm
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from nbfnet import layer, model, task, util
+from nbfnet import layer, model, task, util, dataset
 import edgeformer
 from edgeformer import model
 
