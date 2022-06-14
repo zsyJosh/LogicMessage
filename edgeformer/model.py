@@ -303,7 +303,7 @@ class EdgeTransformerEncoder(nn.Module):
         rel_rep_regularize = self.relation_emb(r_index.flatten())
         assert binary_rep.shape == rel_rep_regularize.shape
         final_rep = torch.cat([binary_rep, rel_rep_regularize], dim=-1)
-        final_rep = final_rep.view(batch_size, -1, self.dim)
+        final_rep = final_rep.view(batch_size, -1, 2 * self.dim)
 
         return final_rep
 
@@ -347,7 +347,7 @@ class EdgeTransformer(nn.Module, core.Configurable):
         self.crit = nn.CrossEntropyLoss(reduction='mean')
         self.encoder = EdgeTransformerEncoder(self.num_heads, self.num_relation, self.num_nodes,
                                               self.dropout, self.dim, self.ff_factor, self.share_layers, self.num_message_rounds, self.flat_attention)
-        self.mlp = layers.MLP(self.dim, [self.dim] * (self.num_mlp_layer - 1) + [1])
+        self.mlp = layers.MLP(2 * self.dim, [self.dim] * (self.num_mlp_layer - 1) + [1])
 
     def remove_easy_edges(self, graph, h_index, t_index, r_index=None):
         if self.remove_one_hop:
@@ -387,11 +387,8 @@ class EdgeTransformer(nn.Module, core.Configurable):
         assert (r_index[:, [0]] == r_index).all()
 
         final_rep = self.encoder(graph, h_index, t_index, r_index, all_loss=None, metric=None)
-        print('final rep', final_rep.shape)
         score = self.mlp(final_rep)
-        print('score shape', score.shape)
         score = score.squeeze(-1)
-        print('score shape', score.shape)
         assert score.shape == h_index.shape
         return score
 
