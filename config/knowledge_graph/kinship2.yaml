@@ -8,7 +8,7 @@ task:
   class: KnowledgeGraphCompletion
   model:
     class: edgeformer
-    num_message_rounds: 8
+    num_message_rounds: 1
     dropout: 0.2
     dim: 128
     num_heads: 4

@@ -231,14 +231,14 @@ class EdgeTransformerEncoder(nn.Module):
 
         # fill in original graph relation embeddings
         # test only
-
+        '''
         tid = torch.randint(104, (2, 12216), device=graph.device)
         rid = torch.randint(50, (1, 12216), device=graph.device)
         adj_ind = torch.cat([tid, rid], dim=0)
         '''
         adj = graph.adjacency
         adj_ind = adj._indices()
-        '''
+
         graph_r_ind = adj_ind[2]
         graph_r_emb = self.relation_emb(graph_r_ind)
         origin_index = adj_ind[0] * self.num_nodes + adj_ind[1]
@@ -262,7 +262,7 @@ class EdgeTransformerEncoder(nn.Module):
         assert graph_emb.shape == (self.num_nodes * self.num_nodes, self.dim)
 
         # creat B batches with same graph input
-        #batched_graph_input = graph_emb.repeat(batch_size, 1, 1)
+        # batched_graph_input = graph_emb.repeat(batch_size, 1, 1)
         batched_graph_input = torch.stack([graph_emb.clone().detach() for i in range(batch_size)])
         batched_graph_input.requires_grad = True
         batched_graph_input = batched_graph_input.view(-1, self.dim)
