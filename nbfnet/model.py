@@ -10,7 +10,7 @@ from torchdrug import core, layers, utils
 from torchdrug.layers import functional
 from torchdrug.core import Registry as R
 
-from . import layer
+import layer
 
 
 @R.register("model.NBFNet")
