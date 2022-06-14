@@ -387,7 +387,11 @@ class EdgeTransformer(nn.Module, core.Configurable):
         assert (r_index[:, [0]] == r_index).all()
 
         final_rep = self.encoder(graph, h_index, t_index, r_index, all_loss=None, metric=None)
-        score = self.mlp(final_rep).squeeze(-1)
+        print('final rep', final_rep.shape)
+        score = self.mlp(final_rep)
+        print('score shape', score.shape)
+        score = score.squeeze(-1)
+        print('score shape', score.shape)
         assert score.shape == h_index.shape
         return score
 
