@@ -25,7 +25,7 @@ task:
     num_nodes: 104
     target_size: 25
   criterion: bce
-  num_negative: 32
+  num_negative: 16
   strict_negative: yes
   adversarial_temperature: 0.5
   sample_weight: no

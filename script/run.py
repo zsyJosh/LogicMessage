@@ -9,9 +9,8 @@ from torchdrug import core
 from torchdrug.utils import comm
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from nbfnet import layer, model, task, util, dataset
-import edgeformer
-from edgeformer import model
+from nbfnet import dataset, layer, model, task, util
+
 
 def train_and_validate(cfg, solver):
     if cfg.train.num_epoch == 0:
