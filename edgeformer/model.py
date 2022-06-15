@@ -246,7 +246,7 @@ class EdgeTransformerEncoder(nn.Module):
 
         # first set zero before filling
         rec_emb = torch.zeros(origin_index.shape, device=graph.device)
-        init_input.scatter(0, origin_index, rec_emb)
+        init_input = init_input.scatter(0, origin_index, rec_emb)
 
         # then fill in relations and query specific masks
         if self.emb_aggregate == "sum":

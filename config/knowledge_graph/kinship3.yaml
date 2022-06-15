@@ -15,7 +15,7 @@ task:
     num_mlp_layer: 2
     remove_one_hop: yes
     max_grad_norm: 1.0
-    share_layers: no
+    share_layers: yes
     no_share_layers: no
     lesion_values: no
     lesion_scores: no
