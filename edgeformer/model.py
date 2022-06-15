@@ -306,7 +306,7 @@ class EdgeTransformerEncoder(nn.Module):
         score = torch.sum(binary_rep * rel_rep_regularize, dim=-1)
         #final_rep = torch.cat([binary_rep, rel_rep_regularize], dim=-1)
         #final_rep = final_rep.view(batch_size, -1, 2 * self.dim)
-        score.view(batch_size, -1)
+        score = score.view(batch_size, -1)
         return score
 
     def _reset_parameters(self):
