@@ -303,10 +303,11 @@ class EdgeTransformerEncoder(nn.Module):
         binary_rep = batched_graphs_loss[query_mask_ind]
         rel_rep_regularize = self.relation_emb(r_index.flatten())
         assert binary_rep.shape == rel_rep_regularize.shape
-        final_rep = torch.cat([binary_rep, rel_rep_regularize], dim=-1)
-        final_rep = final_rep.view(batch_size, -1, 2 * self.dim)
-
-        return final_rep
+        score = torch.sum(binary_rep * rel_rep_regularize, dim=-1)
+        #final_rep = torch.cat([binary_rep, rel_rep_regularize], dim=-1)
+        #final_rep = final_rep.view(batch_size, -1, 2 * self.dim)
+        score.view(batch_size, -1)
+        return score
 
     def _reset_parameters(self):
 
@@ -387,9 +388,9 @@ class EdgeTransformer(nn.Module, core.Configurable):
         assert (h_index[:, [0]] == h_index).all()
         assert (r_index[:, [0]] == r_index).all()
 
-        final_rep = self.encoder(graph, h_index, t_index, r_index, all_loss=None, metric=None)
-        score = self.mlp(final_rep)
-        score = score.squeeze(-1)
+        score = self.encoder(graph, h_index, t_index, r_index, all_loss=None, metric=None)
+        #score = self.mlp(final_rep)
+        #score = score.squeeze(-1)
         assert score.shape == h_index.shape
         return score
 
