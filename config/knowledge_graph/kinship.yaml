@@ -28,7 +28,7 @@ task:
     fix_zero: no
   criterion: bce
   num_negative: 32
-  strict_negative: yes
+  strict_negative: no
   adversarial_temperature: 0.5
   sample_weight: no
 
@@ -42,6 +42,6 @@ engine:
   batch_size: 4
 
 train:
-  num_epoch: 40
+  num_epoch: 20
 
 metric: mrr
