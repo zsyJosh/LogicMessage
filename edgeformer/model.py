@@ -300,6 +300,7 @@ class EdgeTransformerEncoder(nn.Module):
             batched_graph_input = torch.stack([init_input.clone().detach() for i in range(batch_size)])
             batched_graph_input = batched_graph_input.view(-1, self.dim)
             assert batched_graph_input.shape == (self.num_nodes * self.num_nodes * batch_size, self.dim)
+            batched_graph_input.requires_grad = True
 
             origin_index = adj_ind[0] * self.num_nodes + adj_ind[1]
             nnz = len(origin_index)
@@ -329,7 +330,7 @@ class EdgeTransformerEncoder(nn.Module):
                 raise NotImplementedError
 
             graph_emb = batched_graph_input + fill_emb
-            graph_emb.requires_grad = True
+            assert graph_emb.requires_grad == True
 
             # add query specific mask to each batch
             batch_ind = torch.arange(batch_size, device=graph.device).repeat(num_samples, 1).T
