@@ -340,6 +340,8 @@ class EdgeTransformerEncoder(nn.Module):
                 raise NotImplementedError
             fill_emb.to(graph.device)
 
+            print('graph_in_device', batched_graph_input.device)
+            print('fill_emb_device', fill_emb.device)
             graph_emb = batched_graph_input + fill_emb
 
             # add query specific mask to each batch
