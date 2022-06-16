@@ -135,7 +135,7 @@ class EdgeAttention(nn.Module):
 
 class EdgeTransformerLayer(nn.Module):
 
-    def __init__(self, num_heads=4, dropout=0.2, dim=200, ff_factor=4, flat_attention=False, activation="relu"):
+    def __init__(self, num_heads=4, dropout=0.2, dim=200, ff_factor=4, flat_attention=False, short_cut=False, activation="relu"):
         super().__init__()
 
         self.num_heads = num_heads
@@ -161,23 +161,28 @@ class EdgeTransformerLayer(nn.Module):
         self.dropout2 = Dropout(dropout)
         self.dropout3 = Dropout(dropout)
 
+        self.short_cut = short_cut
         self.activation = _get_activation_fn(activation)
 
     def forward(self, batched_graphs, mask=None):
 
+        if self.short_cut:
+            short_batched_graphs = batched_graphs
         batched_graphs = self.norm1(batched_graphs)
         batched_graphs2 = self.edge_attention(batched_graphs, batched_graphs, batched_graphs, mask=mask)
         batched_graphs = batched_graphs + self.dropout1(batched_graphs2)
         batched_graphs = self.norm2(batched_graphs)
         batched_graphs2 = self.linear2(self.dropout2(self.activation(self.linear1(batched_graphs))))
         batched_graphs = batched_graphs + self.dropout3(batched_graphs2)
-
+        if self.short_cut:
+            assert short_batched_graphs.shape == batched_graphs.shape
+            batched_graphs = batched_graphs + short_batched_graphs
         return batched_graphs
 
 
 class EdgeTransformerEncoder(nn.Module):
 
-    def __init__(self, num_heads, num_relation, num_nodes, dropout, dim, ff_factor, share_layers, num_message_rounds, flat_attention, dependent=True, fix_zero=False, activation="relu", emb_aggregate='mean'):
+    def __init__(self, num_heads, num_relation, num_nodes, dropout, dim, ff_factor, share_layers, num_message_rounds, flat_attention, dependent=True, fix_zero=False, short_cut=False, activation="relu", emb_aggregate='mean'):
         super().__init__()
 
         self.num_heads = num_heads
@@ -208,7 +213,7 @@ class EdgeTransformerEncoder(nn.Module):
             # 2 * num_relation(relation and inverse relation) + 1(unqueried mask)
             self.mask_emb = torch.nn.Embedding(num_embeddings=2*self.num_relation+1, embedding_dim=self.dim)
 
-        encoder_layer = EdgeTransformerLayer(num_heads, dropout, dim, ff_factor, flat_attention, activation=activation)
+        encoder_layer = EdgeTransformerLayer(num_heads, dropout, dim, ff_factor, flat_attention, short_cut, activation=activation)
         self.layers = _get_clones(encoder_layer, self.num_layers)
 
         self._reset_parameters()
@@ -403,7 +408,7 @@ class EdgeTransformerEncoder(nn.Module):
 class EdgeTransformer(nn.Module, core.Configurable):
     def __init__(self, num_message_rounds=8, dropout=0.2, dim=200, num_heads=4, num_mlp_layer=2, remove_one_hop=False, max_grad_norm=1.0, share_layers=True,
                  no_share_layers=False, data_path='', lesion_values=False, lesion_scores=False, flat_attention=False,
-                 ff_factor=4, num_relation=26, num_nodes=104, target_size=25, dependent=True, fix_zero=False):
+                 ff_factor=4, num_relation=26, num_nodes=104, target_size=25, dependent=True, fix_zero=False, short_cut=False):
         super().__init__()
 
         self.num_heads = num_heads
@@ -419,6 +424,7 @@ class EdgeTransformer(nn.Module, core.Configurable):
         self.remove_one_hop = remove_one_hop
         self.dependent = dependent
         self.fix_zero = fix_zero
+        self.short_cut = short_cut
 
         input_dim = dim
         self.decoder2vocab = get_mlp(
@@ -428,7 +434,7 @@ class EdgeTransformer(nn.Module, core.Configurable):
 
         self.crit = nn.CrossEntropyLoss(reduction='mean')
         self.encoder = EdgeTransformerEncoder(self.num_heads, self.num_relation, self.num_nodes,
-                                              self.dropout, self.dim, self.ff_factor, self.share_layers, self.num_message_rounds, self.flat_attention, self.dependent, self.fix_zero)
+                                              self.dropout, self.dim, self.ff_factor, self.share_layers, self.num_message_rounds, self.flat_attention, self.dependent, self.fix_zero, self.short_cut)
         self.mlp = layers.MLP(2 * self.dim, [self.dim] * (self.num_mlp_layer - 1) + [1])
 
     def remove_easy_edges(self, graph, h_index, t_index, r_index=None):
