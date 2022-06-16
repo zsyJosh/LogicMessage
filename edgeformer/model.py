@@ -305,7 +305,7 @@ class EdgeTransformerEncoder(nn.Module):
             origin_index = adj_ind[0] * self.num_nodes + adj_ind[1]
             nnz = len(origin_index)
             origin_index = origin_index.repeat(1, batch_size).squeeze()
-            batch_id = torch.arange(batch_size).repeat_interleave(nnz)
+            batch_id = torch.arange(batch_size, device=graph.device).repeat_interleave(nnz)
             batched_origin_index = batch_id * self.num_nodes * self.num_nodes + origin_index
 
             graph_r = adj_ind[2]
