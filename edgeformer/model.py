@@ -239,14 +239,14 @@ class EdgeTransformerEncoder(nn.Module):
 
         # fill in original graph relation embeddings
         # test only
-
+        '''
         tid = torch.randint(104, (2, 12216), device=graph.device)
         rid = torch.randint(50, (1, 12216), device=graph.device)
         adj_ind = torch.cat([tid, rid], dim=0)
         '''
         adj = graph.adjacency
         adj_ind = adj._indices()
-        '''
+
         if not self.dependent:
             graph_r_ind = adj_ind[2]
             graph_r_emb = self.relation_emb(graph_r_ind)
