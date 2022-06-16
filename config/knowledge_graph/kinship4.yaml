@@ -10,12 +10,12 @@ task:
     class: edgeformer
     num_message_rounds: 8
     dropout: 0.2
-    dim: 64
+    dim: 32
     num_heads: 4
     num_mlp_layer: 2
     remove_one_hop: yes
     max_grad_norm: 1.0
-    share_layers: no
+    share_layers: yes
     no_share_layers: no
     lesion_values: no
     lesion_scores: no
@@ -25,9 +25,9 @@ task:
     num_nodes: 104
     target_size: 25
     dependent: yes
-    fix_zero: no
+    fix_zero: yes
   criterion: bce
-  num_negative: 16
+  num_negative: 32
   strict_negative: yes
   adversarial_temperature: 0.5
   sample_weight: no
