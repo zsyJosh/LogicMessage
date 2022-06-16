@@ -337,6 +337,7 @@ class EdgeTransformerEncoder(nn.Module):
                 fill_emb = scatter_max(batched_graph_r_emb, batched_origin_index, dim=0, dim_size=batch_size * self.num_nodes * self.num_nodes)[0]
             else:
                 raise NotImplementedError
+            fill_emb.to(graph.device)
 
             graph_emb = batched_graph_input + fill_emb
 
