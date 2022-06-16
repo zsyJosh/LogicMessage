@@ -15,8 +15,8 @@ task:
     num_mlp_layer: 2
     remove_one_hop: yes
     max_grad_norm: 1.0
-    share_layers: no
-    no_share_layers: yes
+    share_layers: yes
+    no_share_layers: no
     lesion_values: no
     lesion_scores: no
     flat_attention: no
@@ -28,7 +28,7 @@ task:
     fix_zero: no
   criterion: bce
   num_negative: 32
-  strict_negative: yes
+  strict_negative: no
   adversarial_temperature: 0.5
   sample_weight: no
 
