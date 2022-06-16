@@ -177,7 +177,7 @@ class EdgeTransformerLayer(nn.Module):
 
 class EdgeTransformerEncoder(nn.Module):
 
-    def __init__(self, num_heads, num_relation, num_nodes, dropout, dim, ff_factor, share_layers, num_message_rounds, flat_attention, dependent=True, activation="relu", emb_aggregate='mean'):
+    def __init__(self, num_heads, num_relation, num_nodes, dropout, dim, ff_factor, share_layers, num_message_rounds, flat_attention, dependent=True, fix_zero=False, activation="relu", emb_aggregate='mean'):
         super().__init__()
 
         self.num_heads = num_heads
@@ -191,6 +191,7 @@ class EdgeTransformerEncoder(nn.Module):
         self.num_layers = num_message_rounds
         self.emb_aggregate = emb_aggregate
         self.dependent = dependent
+        self.fix_zero = fix_zero
 
         if not self.dependent:
             # 2 * num_relation(relation and inverse relation)
@@ -200,9 +201,12 @@ class EdgeTransformerEncoder(nn.Module):
             # query specific relation embeddings
             self.query_emb = torch.nn.Embedding(num_embeddings=2*self.num_relation, embedding_dim=self.dim)
             self.relation_linear = torch.nn.Linear(self.dim, 2*self.num_relation.item() * self.dim)
-
-        # 2 * num_relation(relation and inverse relation) + 1(unqueried mask)
-        self.mask_emb = torch.nn.Embedding(num_embeddings=2*self.num_relation+1, embedding_dim=self.dim)
+        if self.fix_zero:
+            # 2 * num_relation(relation and inverse relation)
+            self.mask_emb = torch.nn.Embedding(num_embeddings=2*self.num_relation, embedding_dim=self.dim)
+        else:
+            # 2 * num_relation(relation and inverse relation) + 1(unqueried mask)
+            self.mask_emb = torch.nn.Embedding(num_embeddings=2*self.num_relation+1, embedding_dim=self.dim)
 
         encoder_layer = EdgeTransformerLayer(num_heads, dropout, dim, ff_factor, flat_attention, activation=activation)
         self.layers = _get_clones(encoder_layer, self.num_layers)
@@ -233,7 +237,10 @@ class EdgeTransformerEncoder(nn.Module):
         batch_size = h_index.shape[0]
         num_samples = h_index.shape[1]
 
-        init_input = torch.stack([self.mask_emb(torch.tensor(2 * self.num_relation, device=graph.device)).clone().detach() for i in range(self.num_nodes * self.num_nodes)])
+        if not self.fix_zero:
+            init_input = torch.stack([self.mask_emb(torch.tensor(2 * self.num_relation, device=graph.device)).clone().detach() for i in range(self.num_nodes * self.num_nodes)])
+        else:
+            init_input = torch.zeros(self.num_nodes * self.num_nodes, self.dim)
         init_input.requires_grad = True
         init_input.to(graph.device)
 
@@ -253,9 +260,10 @@ class EdgeTransformerEncoder(nn.Module):
             origin_index = adj_ind[0] * self.num_nodes + adj_ind[1]
             origin_index = origin_index.repeat(self.dim, 1).T
 
-            # first set zero before filling
-            rec_emb = torch.zeros(origin_index.shape, device=graph.device)
-            init_input = init_input.scatter(0, origin_index, rec_emb)
+            if not self.fix_zero:
+                # first set zero before filling
+                rec_emb = torch.zeros(origin_index.shape, device=graph.device)
+                init_input = init_input.scatter(0, origin_index, rec_emb)
 
             # then fill in relations and query specific masks
             if self.emb_aggregate == "sum":
@@ -315,9 +323,10 @@ class EdgeTransformerEncoder(nn.Module):
 
             batched_origin_index = batched_origin_index.repeat(self.dim, 1).T
 
-            # first set zero before filling
-            rec_emb = torch.zeros(batched_origin_index.shape, device=graph.device)
-            batched_graph_input = batched_graph_input.scatter(0, batched_origin_index, rec_emb)
+            if not self.fix_zero:
+                # first set zero before filling
+                rec_emb = torch.zeros(batched_origin_index.shape, device=graph.device)
+                batched_graph_input = batched_graph_input.scatter(0, batched_origin_index, rec_emb)
 
             # then fill in relations and query specific masks
             if self.emb_aggregate == "sum":
@@ -366,7 +375,10 @@ class EdgeTransformerEncoder(nn.Module):
         # calculate final representation
         batched_graphs_loss = batched_graphs.view(batch_size * self.num_nodes * self.num_nodes, self.dim)
         binary_rep = batched_graphs_loss[query_mask_ind]
-        rel_rep_regularize = self.relation_emb(r_index.flatten())
+        if self.dependent:
+            rel_rep_regularize = self.query_emb(r_index.flatten())
+        else:
+            rel_rep_regularize = self.relation_emb(r_index.flatten())
         assert binary_rep.shape == rel_rep_regularize.shape
         score = torch.sum(binary_rep * rel_rep_regularize, dim=-1)
         #final_rep = torch.cat([binary_rep, rel_rep_regularize], dim=-1)
