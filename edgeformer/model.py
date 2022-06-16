@@ -199,7 +199,7 @@ class EdgeTransformerEncoder(nn.Module):
         else:
             # query specific relation embeddings
             self.query_emb = torch.nn.Embedding(num_embeddings=2*self.num_relation, embedding_dim=self.dim)
-            self.relation_linear = torch.nn.Linear(self.dim, self.num_relation * self.dim)
+            self.relation_linear = torch.nn.Linear(self.dim, 2*self.num_relation.item() * self.dim)
 
         # 2 * num_relation(relation and inverse relation) + 1(unqueried mask)
         self.mask_emb = torch.nn.Embedding(num_embeddings=2*self.num_relation+1, embedding_dim=self.dim)
@@ -239,14 +239,14 @@ class EdgeTransformerEncoder(nn.Module):
 
         # fill in original graph relation embeddings
         # test only
-        '''
+
         tid = torch.randint(104, (2, 12216), device=graph.device)
         rid = torch.randint(50, (1, 12216), device=graph.device)
         adj_ind = torch.cat([tid, rid], dim=0)
         '''
         adj = graph.adjacency
         adj_ind = adj._indices()
-
+        '''
         if not self.dependent:
             graph_r_ind = adj_ind[2]
             graph_r_emb = self.relation_emb(graph_r_ind)
@@ -294,8 +294,8 @@ class EdgeTransformerEncoder(nn.Module):
             r_batch = r_index[:, 0]
             query = self.query_emb(r_batch)
             assert query.shape[0] == batch_size
-            rel_batch_emb = self.relation_linear(query).view(batch_size, self.num_relation, self.dim)
-            rel_batch_emb = rel_batch_emb.view(batch_size * self.num_relation, self.dim)
+            rel_batch_emb = self.relation_linear(query).view(batch_size, 2 * self.num_relation, self.dim)
+            rel_batch_emb = rel_batch_emb.view(batch_size * 2 * self.num_relation, self.dim)
 
             batched_graph_input = torch.stack([init_input.clone().detach() for i in range(batch_size)])
             batched_graph_input = batched_graph_input.view(-1, self.dim)
@@ -309,8 +309,8 @@ class EdgeTransformerEncoder(nn.Module):
 
             graph_r = adj_ind[2]
             graph_r = graph_r.repeat(1, batch_size).squeeze()
-            batched_graph_r = batch_id * self.num_relation + graph_r
-            batched_graph_r_emb = rel_batch_emb(batched_graph_r)
+            batched_graph_r = batch_id * 2 * self.num_relation + graph_r
+            batched_graph_r_emb = rel_batch_emb[batched_graph_r]
 
             batched_origin_index = batched_origin_index.repeat(self.dim, 1).T
 
