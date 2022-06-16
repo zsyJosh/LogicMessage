@@ -177,7 +177,7 @@ class EdgeTransformerLayer(nn.Module):
 
 class EdgeTransformerEncoder(nn.Module):
 
-    def __init__(self, num_heads, num_relation, num_nodes, dropout, dim, ff_factor, share_layers, num_message_rounds, flat_attention, activation="relu", emb_aggregate='mean'):
+    def __init__(self, num_heads, num_relation, num_nodes, dropout, dim, ff_factor, share_layers, num_message_rounds, flat_attention, dependent=True, activation="relu", emb_aggregate='mean'):
         super().__init__()
 
         self.num_heads = num_heads
@@ -190,9 +190,17 @@ class EdgeTransformerEncoder(nn.Module):
         self.share_layers = share_layers
         self.num_layers = num_message_rounds
         self.emb_aggregate = emb_aggregate
+        self.dependent = dependent
 
-        # 2 * num_relation(relation and inverse relation)
-        self.relation_emb = torch.nn.Embedding(num_embeddings=2*self.num_relation, embedding_dim=self.dim)
+        if not self.dependent:
+            # 2 * num_relation(relation and inverse relation)
+            # share the same relation embedding over queries
+            self.relation_emb = torch.nn.Embedding(num_embeddings=2*self.num_relation, embedding_dim=self.dim)
+        else:
+            # query specific relation embeddings
+            self.query_emb = torch.nn.Embedding(num_embeddings=2*self.num_relation, embedding_dim=self.dim)
+            self.relation_linear = torch.nn.Linear(self.dim, self.num_relation * self.dim)
+
         # 2 * num_relation(relation and inverse relation) + 1(unqueried mask)
         self.mask_emb = torch.nn.Embedding(num_embeddings=2*self.num_relation+1, embedding_dim=self.dim)
 
@@ -239,47 +247,103 @@ class EdgeTransformerEncoder(nn.Module):
         adj = graph.adjacency
         adj_ind = adj._indices()
 
-        graph_r_ind = adj_ind[2]
-        graph_r_emb = self.relation_emb(graph_r_ind)
-        origin_index = adj_ind[0] * self.num_nodes + adj_ind[1]
-        origin_index = origin_index.repeat(self.dim, 1).T
+        if not self.dependent:
+            graph_r_ind = adj_ind[2]
+            graph_r_emb = self.relation_emb(graph_r_ind)
+            origin_index = adj_ind[0] * self.num_nodes + adj_ind[1]
+            origin_index = origin_index.repeat(self.dim, 1).T
 
-        # first set zero before filling
-        rec_emb = torch.zeros(origin_index.shape, device=graph.device)
-        init_input = init_input.scatter(0, origin_index, rec_emb)
+            # first set zero before filling
+            rec_emb = torch.zeros(origin_index.shape, device=graph.device)
+            init_input = init_input.scatter(0, origin_index, rec_emb)
 
-        # then fill in relations and query specific masks
-        if self.emb_aggregate == "sum":
-            fill_emb = scatter_add(graph_r_emb, origin_index, dim=0, dim_size=self.num_nodes * self.num_nodes)
-        elif self.emb_aggregate == "mean":
-            fill_emb = scatter_mean(graph_r_emb, origin_index, dim=0, dim_size=self.num_nodes * self.num_nodes)
-        elif self.emb_aggregate == "max":
-            fill_emb = scatter_max(graph_r_emb, origin_index, dim=0, dim_size=self.num_nodes * self.num_nodes)[0]
+            # then fill in relations and query specific masks
+            if self.emb_aggregate == "sum":
+                fill_emb = scatter_add(graph_r_emb, origin_index, dim=0, dim_size=self.num_nodes * self.num_nodes)
+            elif self.emb_aggregate == "mean":
+                fill_emb = scatter_mean(graph_r_emb, origin_index, dim=0, dim_size=self.num_nodes * self.num_nodes)
+            elif self.emb_aggregate == "max":
+                fill_emb = scatter_max(graph_r_emb, origin_index, dim=0, dim_size=self.num_nodes * self.num_nodes)[0]
+            else:
+                raise NotImplementedError
+
+            graph_emb = init_input + fill_emb
+            assert graph_emb.shape == (self.num_nodes * self.num_nodes, self.dim)
+
+            # creat B batches with same graph input
+            # batched_graph_input = graph_emb.repeat(batch_size, 1, 1)
+            batched_graph_input = torch.stack([graph_emb.clone().detach() for i in range(batch_size)])
+            batched_graph_input.requires_grad = True
+            batched_graph_input = batched_graph_input.view(-1, self.dim)
+            assert batched_graph_input.shape == (self.num_nodes * self.num_nodes * batch_size, self.dim)
+
+            # add query specific mask to each batch
+            batch_ind = torch.arange(batch_size, device=graph.device).repeat(num_samples, 1).T
+            assert batch_ind.shape == h_index.shape
+            query_mask_ind = batch_ind * self.num_nodes * self.num_nodes + h_index * self.num_nodes + t_index
+            query_mask_ind = query_mask_ind.flatten()
+            repeat_query_mask_ind = query_mask_ind.repeat(self.dim, 1).T
+
+            r_emb = self.mask_emb(r_index.flatten())
+            assert repeat_query_mask_ind.shape == r_emb.shape
+
+            batched_graph_input = batched_graph_input.scatter(0, repeat_query_mask_ind, r_emb)
+            final_graph_input = batched_graph_input.view(batch_size, self.num_nodes, self.num_nodes, self.dim)
+
         else:
-            raise NotImplementedError
+            r_batch = r_index[:, 0]
+            query = self.query_emb(r_batch)
+            assert query.shape[0] == batch_size
+            rel_batch_emb = self.relation_linear(query).view(batch_size, self.num_relation, self.dim)
+            rel_batch_emb = rel_batch_emb.view(batch_size * self.num_relation, self.dim)
 
-        graph_emb = init_input + fill_emb
-        assert graph_emb.shape == (self.num_nodes * self.num_nodes, self.dim)
+            batched_graph_input = torch.stack([init_input.clone().detach() for i in range(batch_size)])
+            batched_graph_input = batched_graph_input.view(-1, self.dim)
+            assert batched_graph_input.shape == (self.num_nodes * self.num_nodes * batch_size, self.dim)
 
-        # creat B batches with same graph input
-        # batched_graph_input = graph_emb.repeat(batch_size, 1, 1)
-        batched_graph_input = torch.stack([graph_emb.clone().detach() for i in range(batch_size)])
-        batched_graph_input.requires_grad = True
-        batched_graph_input = batched_graph_input.view(-1, self.dim)
-        assert batched_graph_input.shape == (self.num_nodes * self.num_nodes * batch_size, self.dim)
+            origin_index = adj_ind[0] * self.num_nodes + adj_ind[1]
+            nnz = len(origin_index)
+            origin_index = origin_index.repeat(1, batch_size).squeeze()
+            batch_id = torch.arange(batch_size).repeat_interleave(nnz)
+            batched_origin_index = batch_id * self.num_nodes * self.num_nodes + origin_index
 
-        # add query specific mask to each batch
-        batch_ind = torch.arange(batch_size, device=graph.device).repeat(num_samples, 1).T
-        assert batch_ind.shape == h_index.shape
-        query_mask_ind = batch_ind * self.num_nodes * self.num_nodes + h_index * self.num_nodes + t_index
-        query_mask_ind = query_mask_ind.flatten()
-        repeat_query_mask_ind = query_mask_ind.repeat(self.dim, 1).T
+            graph_r = adj_ind[2]
+            graph_r = graph_r.repeat(1, batch_size).squeeze()
+            batched_graph_r = batch_id * self.num_relation + graph_r
+            batched_graph_r_emb = rel_batch_emb(batched_graph_r)
 
-        r_emb = self.mask_emb(r_index.flatten())
-        assert repeat_query_mask_ind.shape == r_emb.shape
+            batched_origin_index = batched_origin_index.repeat(self.dim, 1).T
 
-        batched_graph_input = batched_graph_input.scatter(0, repeat_query_mask_ind, r_emb)
-        batched_graphs = batched_graph_input.view(batch_size, self.num_nodes, self.num_nodes, self.dim)
+            # first set zero before filling
+            rec_emb = torch.zeros(batched_origin_index.shape, device=graph.device)
+            batched_graph_input = batched_graph_input.scatter(0, batched_origin_index, rec_emb)
+
+            # then fill in relations and query specific masks
+            if self.emb_aggregate == "sum":
+                fill_emb = scatter_add(batched_graph_r_emb, batched_origin_index, dim=0, dim_size=batch_size * self.num_nodes * self.num_nodes)
+            elif self.emb_aggregate == "mean":
+                fill_emb = scatter_mean(batched_graph_r_emb, batched_origin_index, dim=0, dim_size=batch_size * self.num_nodes * self.num_nodes)
+            elif self.emb_aggregate == "max":
+                fill_emb = scatter_max(batched_graph_r_emb, batched_origin_index, dim=0, dim_size=batch_size * self.num_nodes * self.num_nodes)[0]
+            else:
+                raise NotImplementedError
+
+            graph_emb = batched_graph_input + fill_emb
+            graph_emb.requires_grad = True
+
+            # add query specific mask to each batch
+            batch_ind = torch.arange(batch_size, device=graph.device).repeat(num_samples, 1).T
+            assert batch_ind.shape == h_index.shape
+            query_mask_ind = batch_ind * self.num_nodes * self.num_nodes + h_index * self.num_nodes + t_index
+            query_mask_ind = query_mask_ind.flatten()
+            repeat_query_mask_ind = query_mask_ind.repeat(self.dim, 1).T
+
+            r_emb = self.mask_emb(r_index.flatten())
+            assert repeat_query_mask_ind.shape == r_emb.shape
+
+            graph_emb = graph_emb.scatter(0, repeat_query_mask_ind, r_emb)
+            final_graph_input = graph_emb.view(batch_size, self.num_nodes, self.num_nodes, self.dim)
+
 
         # currently consider all pairs of attention, mask is all false; if train graph is not full graph,
         # mask nodes not existent in train graph
@@ -293,10 +357,10 @@ class EdgeTransformerEncoder(nn.Module):
 
         if not self.share_layers:
             for mod in self.layers:
-                batched_graphs = mod(batched_graphs, mask=mask)
+                batched_graphs = mod(final_graph_input, mask=mask)
         else:
             for i in range(self.num_layers):
-                batched_graphs = self.layers[0](batched_graphs, mask=mask)
+                batched_graphs = self.layers[0](final_graph_input, mask=mask)
 
         # calculate final representation
         batched_graphs_loss = batched_graphs.view(batch_size * self.num_nodes * self.num_nodes, self.dim)
@@ -325,7 +389,7 @@ class EdgeTransformerEncoder(nn.Module):
 class EdgeTransformer(nn.Module, core.Configurable):
     def __init__(self, num_message_rounds=8, dropout=0.2, dim=200, num_heads=4, num_mlp_layer=2, remove_one_hop=False, max_grad_norm=1.0, share_layers=True,
                  no_share_layers=False, data_path='', lesion_values=False, lesion_scores=False, flat_attention=False,
-                 ff_factor=4, num_relation=26, num_nodes=104, target_size=25):
+                 ff_factor=4, num_relation=26, num_nodes=104, target_size=25, dependent=True):
         super().__init__()
 
         self.num_heads = num_heads
@@ -339,6 +403,7 @@ class EdgeTransformer(nn.Module, core.Configurable):
         self.num_mlp_layer = num_mlp_layer
         self.share_layers = share_layers
         self.remove_one_hop = remove_one_hop
+        self.dependent = dependent
 
         input_dim = dim
         self.decoder2vocab = get_mlp(
@@ -348,7 +413,7 @@ class EdgeTransformer(nn.Module, core.Configurable):
 
         self.crit = nn.CrossEntropyLoss(reduction='mean')
         self.encoder = EdgeTransformerEncoder(self.num_heads, self.num_relation, self.num_nodes,
-                                              self.dropout, self.dim, self.ff_factor, self.share_layers, self.num_message_rounds, self.flat_attention)
+                                              self.dropout, self.dim, self.ff_factor, self.share_layers, self.num_message_rounds, self.flat_attention, self.dependent)
         self.mlp = layers.MLP(2 * self.dim, [self.dim] * (self.num_mlp_layer - 1) + [1])
 
     def remove_easy_edges(self, graph, h_index, t_index, r_index=None):

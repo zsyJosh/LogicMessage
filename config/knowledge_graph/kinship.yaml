@@ -24,6 +24,7 @@ task:
     num_relation: 25
     num_nodes: 104
     target_size: 25
+    dependent: yes
   criterion: bce
   num_negative: 32
   strict_negative: yes
