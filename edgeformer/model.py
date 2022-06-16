@@ -339,7 +339,6 @@ class EdgeTransformerEncoder(nn.Module):
                 raise NotImplementedError
 
             graph_emb = batched_graph_input + fill_emb
-            assert graph_emb.requires_grad == True
 
             # add query specific mask to each batch
             batch_ind = torch.arange(batch_size, device=graph.device).repeat(num_samples, 1).T
