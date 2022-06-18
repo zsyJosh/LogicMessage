@@ -29,7 +29,7 @@ task:
     query_classifier: no
   criterion: bce
   num_negative: 32
-  strict_negative: no
+  strict_negative: yes
   adversarial_temperature: 0.5
   sample_weight: no
 
