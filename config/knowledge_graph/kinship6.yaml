@@ -26,7 +26,7 @@ task:
     target_size: 25
     dependent: yes
     fix_zero: yes
-    short_cut: yes
+    short_cut: no
     query_classifier: yes
   criterion: bce
   num_negative: 32
