@@ -166,23 +166,18 @@ class EdgeTransformerLayer(nn.Module):
 
     def forward(self, batched_graphs, mask=None):
 
-        if self.short_cut:
-            short_batched_graphs = batched_graphs
         batched_graphs = self.norm1(batched_graphs)
         batched_graphs2 = self.edge_attention(batched_graphs, batched_graphs, batched_graphs, mask=mask)
         batched_graphs = batched_graphs + self.dropout1(batched_graphs2)
         batched_graphs = self.norm2(batched_graphs)
         batched_graphs2 = self.linear2(self.dropout2(self.activation(self.linear1(batched_graphs))))
         batched_graphs = batched_graphs + self.dropout3(batched_graphs2)
-        if self.short_cut:
-            assert short_batched_graphs.shape == batched_graphs.shape
-            batched_graphs = batched_graphs + short_batched_graphs
         return batched_graphs
 
 
 class EdgeTransformerEncoder(nn.Module):
 
-    def __init__(self, num_heads, num_relation, num_nodes, dropout, dim, ff_factor, share_layers, num_message_rounds, flat_attention, dependent=True, fix_zero=False, short_cut=False, query_classifier=True, inner_classifier=False, activation="relu", emb_aggregate='mean'):
+    def __init__(self, num_heads, num_relation, num_nodes, dropout, dim, ff_factor, share_layers, num_message_rounds, flat_attention, dependent=True, fix_zero=False, short_cut=False, inner_classifier=False, activation="relu", emb_aggregate='mean'):
         super().__init__()
 
         self.num_heads = num_heads
@@ -197,7 +192,6 @@ class EdgeTransformerEncoder(nn.Module):
         self.emb_aggregate = emb_aggregate
         self.dependent = dependent
         self.fix_zero = fix_zero
-        self.query_classifier = query_classifier
         self.inner_classifier = inner_classifier
 
         if not self.dependent:
@@ -440,7 +434,6 @@ class EdgeTransformer(nn.Module, core.Configurable):
         self.dependent = dependent
         self.fix_zero = fix_zero
         self.short_cut = short_cut
-        self.query_classifier = query_classifier
         self.inner_classifier = inner_classifier
 
         input_dim = dim
@@ -453,7 +446,7 @@ class EdgeTransformer(nn.Module, core.Configurable):
         self.encoder = EdgeTransformerEncoder(self.num_heads, self.num_relation, self.num_nodes,
                                               self.dropout, self.dim, self.ff_factor, self.share_layers,
                                               self.num_message_rounds, self.flat_attention, self.dependent,
-                                              self.fix_zero, self.short_cut, self.query_classifier, self.inner_classifier)
+                                              self.fix_zero, self.short_cut, self.inner_classifier)
         if self.inner_classifier:
             self.mlp = layers.MLP(2 * self.dim, [self.dim] * (self.num_mlp_layer - 1) + [1])
 
