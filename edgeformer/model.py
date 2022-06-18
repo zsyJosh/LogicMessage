@@ -252,14 +252,14 @@ class EdgeTransformerEncoder(nn.Module):
 
         # fill in original graph relation embeddings
         # test only
-        '''
+
         tid = torch.randint(104, (2, 12216), device=graph.device)
         rid = torch.randint(50, (1, 12216), device=graph.device)
         adj_ind = torch.cat([tid, rid], dim=0)
         '''
         adj = graph.adjacency
         adj_ind = adj._indices()
-
+        '''
         if not self.dependent:
             graph_r_ind = adj_ind[2]
             graph_r_emb = self.relation_emb(graph_r_ind)
@@ -420,7 +420,7 @@ class EdgeTransformerEncoder(nn.Module):
 class EdgeTransformer(nn.Module, core.Configurable):
     def __init__(self, num_message_rounds=8, dropout=0.2, dim=200, num_heads=4, num_mlp_layer=2, remove_one_hop=False, max_grad_norm=1.0, share_layers=True,
                  no_share_layers=False, data_path='', lesion_values=False, lesion_scores=False, flat_attention=False,
-                 ff_factor=4, num_relation=26, num_nodes=104, target_size=25, dependent=True, fix_zero=False, short_cut=False, query_classifier=True):
+                 ff_factor=4, num_relation=26, num_nodes=104, target_size=25, dependent=True, fix_zero=False, short_cut=False, query_classifier=False):
         super().__init__()
 
         self.num_heads = num_heads

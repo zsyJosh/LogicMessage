@@ -26,7 +26,7 @@ task:
     target_size: 25
     dependent: yes
     fix_zero: yes
-    shortcut: yes
+    short_cut: yes
   criterion: bce
   num_negative: 32
   strict_negative: yes
