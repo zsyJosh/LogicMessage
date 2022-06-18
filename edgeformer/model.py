@@ -420,7 +420,7 @@ class EdgeTransformerEncoder(nn.Module):
 class EdgeTransformer(nn.Module, core.Configurable):
     def __init__(self, num_message_rounds=8, dropout=0.2, dim=200, num_heads=4, num_mlp_layer=2, remove_one_hop=False, max_grad_norm=1.0, share_layers=True,
                  no_share_layers=False, data_path='', lesion_values=False, lesion_scores=False, flat_attention=False,
-                 ff_factor=4, num_relation=26, num_nodes=104, target_size=25, dependent=True, fix_zero=False, short_cut=False, query_classifier=False):
+                 ff_factor=4, num_relation=26, num_nodes=104, target_size=25, dependent=True, fix_zero=False, short_cut=False, query_classifier=True):
         super().__init__()
 
         self.num_heads = num_heads
