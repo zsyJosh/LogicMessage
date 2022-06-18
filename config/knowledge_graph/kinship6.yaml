@@ -26,9 +26,10 @@ task:
     target_size: 25
     dependent: yes
     fix_zero: yes
+    shortcut: yes
   criterion: bce
   num_negative: 32
-  strict_negative: no
+  strict_negative: yes
   adversarial_temperature: 0.5
   sample_weight: no
 

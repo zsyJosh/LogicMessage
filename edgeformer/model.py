@@ -182,7 +182,7 @@ class EdgeTransformerLayer(nn.Module):
 
 class EdgeTransformerEncoder(nn.Module):
 
-    def __init__(self, num_heads, num_relation, num_nodes, dropout, dim, ff_factor, share_layers, num_message_rounds, flat_attention, dependent=True, fix_zero=False, short_cut=False, activation="relu", emb_aggregate='mean'):
+    def __init__(self, num_heads, num_relation, num_nodes, dropout, dim, ff_factor, share_layers, num_message_rounds, flat_attention, dependent=True, fix_zero=False, short_cut=False, query_classifier=True, activation="relu", emb_aggregate='mean'):
         super().__init__()
 
         self.num_heads = num_heads
@@ -197,6 +197,7 @@ class EdgeTransformerEncoder(nn.Module):
         self.emb_aggregate = emb_aggregate
         self.dependent = dependent
         self.fix_zero = fix_zero
+        self.query_classifier = query_classifier
 
         if not self.dependent:
             # 2 * num_relation(relation and inverse relation)
@@ -382,7 +383,18 @@ class EdgeTransformerEncoder(nn.Module):
         batched_graphs_loss = batched_graphs.view(batch_size * self.num_nodes * self.num_nodes, self.dim)
         binary_rep = batched_graphs_loss[query_mask_ind]
         if self.dependent:
-            rel_rep_regularize = self.query_emb(r_index.flatten())
+            if self.query_classifier:
+                rel_rep_regularize = self.query_emb(r_index.flatten())
+            else:
+                r_b = r_index[:, 0]
+                q_b = self.query_emb(r_b)
+                assert q_b.shape[0] == batch_size
+                r_b_emb = self.relation_linear(q_b).view(batch_size, 2 * self.num_relation, self.dim)
+                r_b_emb = r_b_emb.view(batch_size * 2 * self.num_relation, self.dim)
+                batch_id = torch.arange(batch_size, device=graph.device).repeat_interleave(num_samples)
+                assert batch_id.shape == r_index.flatten().shape
+                rel_rep_index = r_index.flatten() + batch_id * 2 * self.num_relation
+                rel_rep_regularize = r_b_emb[rel_rep_index]
         else:
             rel_rep_regularize = self.relation_emb(r_index.flatten())
         assert binary_rep.shape == rel_rep_regularize.shape
@@ -408,7 +420,7 @@ class EdgeTransformerEncoder(nn.Module):
 class EdgeTransformer(nn.Module, core.Configurable):
     def __init__(self, num_message_rounds=8, dropout=0.2, dim=200, num_heads=4, num_mlp_layer=2, remove_one_hop=False, max_grad_norm=1.0, share_layers=True,
                  no_share_layers=False, data_path='', lesion_values=False, lesion_scores=False, flat_attention=False,
-                 ff_factor=4, num_relation=26, num_nodes=104, target_size=25, dependent=True, fix_zero=False, short_cut=False):
+                 ff_factor=4, num_relation=26, num_nodes=104, target_size=25, dependent=True, fix_zero=False, short_cut=False, query_classifier=True):
         super().__init__()
 
         self.num_heads = num_heads
@@ -425,6 +437,7 @@ class EdgeTransformer(nn.Module, core.Configurable):
         self.dependent = dependent
         self.fix_zero = fix_zero
         self.short_cut = short_cut
+        self.query_classifier = query_classifier
 
         input_dim = dim
         self.decoder2vocab = get_mlp(
@@ -434,7 +447,7 @@ class EdgeTransformer(nn.Module, core.Configurable):
 
         self.crit = nn.CrossEntropyLoss(reduction='mean')
         self.encoder = EdgeTransformerEncoder(self.num_heads, self.num_relation, self.num_nodes,
-                                              self.dropout, self.dim, self.ff_factor, self.share_layers, self.num_message_rounds, self.flat_attention, self.dependent, self.fix_zero, self.short_cut)
+                                              self.dropout, self.dim, self.ff_factor, self.share_layers, self.num_message_rounds, self.flat_attention, self.dependent, self.fix_zero, self.short_cut, self.query_classifier)
         self.mlp = layers.MLP(2 * self.dim, [self.dim] * (self.num_mlp_layer - 1) + [1])
 
     def remove_easy_edges(self, graph, h_index, t_index, r_index=None):
