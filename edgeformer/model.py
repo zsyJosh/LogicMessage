@@ -400,11 +400,11 @@ class EdgeTransformerEncoder(nn.Module):
             rel_rep_regularize = self.relation_emb(r_index.flatten())
         assert binary_rep.shape == rel_rep_regularize.shape
         if self.inner_classifier:
-            score = torch.sum(binary_rep * rel_rep_regularize, dim=-1)
-            score = score.view(batch_size, -1)
-        else:
             final_rep = torch.cat([binary_rep, rel_rep_regularize], dim=-1)
             score = final_rep.view(batch_size, -1, 2 * self.dim)
+        else:
+            score = torch.sum(binary_rep * rel_rep_regularize, dim=-1)
+            score = score.view(batch_size, -1)
         return score
 
     def _reset_parameters(self):
