@@ -155,8 +155,8 @@ class EdgeTransformerLayer(nn.Module):
         self.linear1 = nn.Linear(d_model, d_ff)
         self.linear2 = nn.Linear(d_ff, d_model)
 
-        self.norm1 = BatchNorm1d(d_model)
-        self.norm2 = BatchNorm1d(d_model)
+        self.norm1 = LayerNorm(d_model)
+        self.norm2 = LayerNorm(d_model)
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
         self.dropout3 = Dropout(dropout)
@@ -466,8 +466,6 @@ class EdgeTransformer(nn.Module, core.Configurable):
         return new_h_index, new_t_index, new_r_index
 
     def forward(self, graph, h_index, t_index, r_index=None, all_loss=None, metric=None):
-        if all_loss is not None:
-            graph = self.remove_easy_edges(graph, h_index, t_index, r_index)
         assert graph.num_relation
         graph = graph.undirected(add_inverse=True)
         h_index, t_index, r_index = self.negative_sample_to_tail(h_index, t_index, r_index)
