@@ -2,7 +2,7 @@ import copy
 import math
 import torch
 from torch import nn
-from torch.nn import Parameter, ModuleList, LayerNorm, Dropout
+from torch.nn import Parameter, ModuleList, LayerNorm, Dropout, BatchNorm1d
 import torch.nn.functional as F
 from torch_scatter import scatter_add, scatter_mean, scatter_max, scatter_sum
 
@@ -155,8 +155,8 @@ class EdgeTransformerLayer(nn.Module):
         self.linear1 = nn.Linear(d_model, d_ff)
         self.linear2 = nn.Linear(d_ff, d_model)
 
-        self.norm1 = LayerNorm(d_model)
-        self.norm2 = LayerNorm(d_model)
+        self.norm1 = BatchNorm1d(d_model)
+        self.norm2 = BatchNorm1d(d_model)
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
         self.dropout3 = Dropout(dropout)
