@@ -182,7 +182,7 @@ class EdgeTransformerLayer(nn.Module):
 
 class EdgeTransformerEncoder(nn.Module):
 
-    def __init__(self, num_heads, num_relation, num_nodes, dropout, dim, ff_factor, share_layers, num_message_rounds, flat_attention, dependent=True, fix_zero=False, short_cut=False, activation="relu", emb_aggregate='mean'):
+    def __init__(self, num_heads, num_relation, num_nodes, dropout, dim, ff_factor, share_layers, num_message_rounds, flat_attention, dependent=True, fix_zero=False, short_cut=False, rel_reg=False, activation="relu", emb_aggregate='mean'):
         super().__init__()
 
         self.num_heads = num_heads
@@ -197,6 +197,7 @@ class EdgeTransformerEncoder(nn.Module):
         self.emb_aggregate = emb_aggregate
         self.dependent = dependent
         self.fix_zero = fix_zero
+        self.rel_reg = rel_reg
 
         if not self.dependent:
             # 2 * num_relation(relation and inverse relation)
@@ -386,10 +387,12 @@ class EdgeTransformerEncoder(nn.Module):
         else:
             rel_rep_regularize = self.relation_emb(r_index.flatten())
         assert binary_rep.shape == rel_rep_regularize.shape
-        score = torch.sum(binary_rep * rel_rep_regularize, dim=-1)
-        #final_rep = torch.cat([binary_rep, rel_rep_regularize], dim=-1)
-        #final_rep = final_rep.view(batch_size, -1, 2 * self.dim)
-        score = score.view(batch_size, -1)
+        if self.rel_reg:
+            final_rep = torch.cat([binary_rep, rel_rep_regularize], dim=-1)
+            score = final_rep.view(batch_size, -1, 2 * self.dim)
+        else:
+            score = torch.sum(binary_rep * rel_rep_regularize, dim=-1)
+            score = score.view(batch_size, -1)
         return score
 
     def _reset_parameters(self):
@@ -408,7 +411,7 @@ class EdgeTransformerEncoder(nn.Module):
 class EdgeTransformer(nn.Module, core.Configurable):
     def __init__(self, num_message_rounds=8, dropout=0.2, dim=200, num_heads=4, num_mlp_layer=2, remove_one_hop=False, max_grad_norm=1.0, share_layers=True,
                  no_share_layers=False, data_path='', lesion_values=False, lesion_scores=False, flat_attention=False,
-                 ff_factor=4, num_relation=26, num_nodes=104, target_size=25, dependent=True, fix_zero=False, short_cut=False):
+                 ff_factor=4, num_relation=26, num_nodes=104, target_size=25, dependent=True, fix_zero=False, short_cut=False, rel_reg=False):
         super().__init__()
 
         self.num_heads = num_heads
@@ -425,6 +428,7 @@ class EdgeTransformer(nn.Module, core.Configurable):
         self.dependent = dependent
         self.fix_zero = fix_zero
         self.short_cut = short_cut
+        self.rel_reg = rel_reg
 
         input_dim = dim
         self.decoder2vocab = get_mlp(
@@ -434,7 +438,7 @@ class EdgeTransformer(nn.Module, core.Configurable):
 
         self.crit = nn.CrossEntropyLoss(reduction='mean')
         self.encoder = EdgeTransformerEncoder(self.num_heads, self.num_relation, self.num_nodes,
-                                              self.dropout, self.dim, self.ff_factor, self.share_layers, self.num_message_rounds, self.flat_attention, self.dependent, self.fix_zero, self.short_cut)
+                                              self.dropout, self.dim, self.ff_factor, self.share_layers, self.num_message_rounds, self.flat_attention, self.dependent, self.fix_zero, self.short_cut, self.rel_reg)
         self.mlp = layers.MLP(2 * self.dim, [self.dim] * (self.num_mlp_layer - 1) + [1])
 
     def remove_easy_edges(self, graph, h_index, t_index, r_index=None):
@@ -466,6 +470,8 @@ class EdgeTransformer(nn.Module, core.Configurable):
         return new_h_index, new_t_index, new_r_index
 
     def forward(self, graph, h_index, t_index, r_index=None, all_loss=None, metric=None):
+        if all_loss is not None:
+            graph = self.remove_easy_edges(graph, h_index, t_index, r_index)
         assert graph.num_relation
         graph = graph.undirected(add_inverse=True)
         h_index, t_index, r_index = self.negative_sample_to_tail(h_index, t_index, r_index)
@@ -473,8 +479,9 @@ class EdgeTransformer(nn.Module, core.Configurable):
         assert (r_index[:, [0]] == r_index).all()
 
         score = self.encoder(graph, h_index, t_index, r_index, all_loss=None, metric=None)
-        #score = self.mlp(final_rep)
-        #score = score.squeeze(-1)
+        if self.rel_reg:
+            score = self.mlp(score)
+            score = score.squeeze(-1)
         assert score.shape == h_index.shape
         return score
 

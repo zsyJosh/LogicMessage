@@ -27,6 +27,7 @@ task:
     dependent: yes
     fix_zero: yes
     short_cut: yes
+    rel_reg: yes
   criterion: bce
   num_negative: 32
   strict_negative: yes
